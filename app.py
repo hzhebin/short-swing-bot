@@ -1,4 +1,3 @@
-st.caption("✅ 本版本包含爆仓风险检测模块")
 import streamlit as st
 import pandas as pd
 import requests
@@ -6,6 +5,7 @@ import time
 import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="撸短策略自动化回测系统", layout="wide")
+st.caption("✅ 本版本包含爆仓风险检测模块")
 st.title("📈 撸短策略自动化回测系统")
 
 st.sidebar.header("策略参数设置")
