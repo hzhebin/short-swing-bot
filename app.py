@@ -1,3 +1,4 @@
+st.caption("✅ 本版本包含爆仓风险检测模块")
 import streamlit as st
 import pandas as pd
 import requests
