@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="专业量化回测仪表盘", layout="wide")
+st.set_page_config(page_title="Bob的专业量化回测仪表盘", layout="wide")
 st.title("📈 策略回测仪表盘")
 
 # 模拟数据（后期可通过后端注入）
