@@ -1,144 +1,100 @@
-# app.py — 完整量化回测仪表盘（含爆仓统计 & 全量数据导出）
-import streamlit as st
-import pandas as pd
-import requests
-import time
+# app.py — Advanced Backtest Dashboard
+import streamlit as st, pandas as pd, requests, time, numpy as np, plotly.graph_objects as go
 from datetime import datetime
-import plotly.graph_objects as go
 
-st.set_page_config(page_title="策略回测仪表盘", layout="wide")
-st.title("📈 撸短策略自动化回测系统")
+# ---------- UI ----------
+st.set_page_config(page_title="Advanced Backtest", layout="wide")
+st.title("📈 Advanced Quant Backtest System")
 
-# ============== ⬇️ 侧边栏参数 =================
-st.sidebar.header("策略参数设置")
-symbols = st.sidebar.multiselect("交易对（可多选）", ["BTCUSDT", "ETHUSDT", "BNBUSDT"], default=["BTCUSDT"])
-start_date = st.sidebar.date_input("开始日期", value=pd.to_datetime("2024-04-01"))
-end_date = st.sidebar.date_input("结束日期", value=pd.to_datetime("2025-04-30"))
-leverage_range = st.sidebar.slider("杠杆倍数范围", 1, 50, (10, 20))
-position_range = st.sidebar.slider("建仓金额范围($)", 10, 1000, (100, 200), step=50)
-fee_rate = st.sidebar.slider("手续费率", 0.0000, 0.01, 0.0005, step=0.0001)
-initial_balance = st.sidebar.number_input("初始资金 ($)", value=10000)
-explosion_drawdown = st.sidebar.slider("爆仓触发回撤(%)", 10, 90, 50)
+sb = st.sidebar
+sb.header("参数面板")
+symbols   = sb.multiselect("交易对", ["BTCUSDT","ETHUSDT","BNBUSDT"], default=["BTCUSDT"])
+start     = sb.date_input("开始日期", value=pd.to_datetime("2024-04-01"))
+end       = sb.date_input("结束日期", value=pd.to_datetime("2025-04-30"))
+init_bal  = sb.number_input("初始资金 $", 1000, 1_000_000, 10_000, 1000)
+lev       = sb.slider("杠杆",1,50,10)
+long_th   = sb.slider("做多开仓下跌阈值 %",0.5,5.0,1.0,0.1)/100
+short_th  = sb.slider("做空开仓上涨阈值 %",0.5,5.0,1.0,0.1)/100
+tp_pct    = sb.slider("止盈 %",0.5,10.0,2.0,0.1)/100
+sl_pct    = sb.slider("止损 %",0.5,10.0,3.0,0.1)/100
+slip_pct  = sb.slider("滑点 ‰",0.0,5.0,1.0,0.1)/1000
+maint_mgn = sb.slider("维持保证金率 %",1,50,10)/100
+pos_pct   = sb.slider("单次投入资金占比 %",1,100,20)/100
+ts_tag    = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-# ============== ⬇️ 获取数据 =================
+# ---------- Data ----------
 @st.cache_data
-def get_data(symbol: str, interval: str = "1h", start=None, end=None):
-    url = "https://api.binance.com/api/v3/klines"
-    start_ts = int(time.mktime(time.strptime(str(start), "%Y-%m-%d")) * 1000)
-    end_ts = int(time.mktime(time.strptime(str(end), "%Y-%m-%d")) * 1000)
-    klines = []
-    while start_ts < end_ts:
-        r = requests.get(url, params={
-            "symbol": symbol,
-            "interval": interval,
-            "startTime": start_ts,
-            "endTime": end_ts,
-            "limit": 1000
-        })
-        d = r.json()
-        if not isinstance(d, list) or len(d) == 0:
-            return pd.DataFrame()
-        klines.extend(d)
-        start_ts = d[-1][0] + 1
-        time.sleep(0.05)  # 避免触发频控
-    df = pd.DataFrame(klines, columns=[
-        "timestamp", "open", "high", "low", "close", "volume",
-        "close_time", "quote_asset_volume", "num_trades",
-        "taker_base_vol", "taker_quote_vol", "ignore"
-    ])
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    df["close"] = df["close"].astype(float)
-    return df[["timestamp", "close"]]
+def fetch(symbol, start_dt, end_dt):
+    url="https://api.binance.com/api/v3/klines"
+    s=int(time.mktime(time.strptime(str(start_dt),"%Y-%m-%d"))*1000)
+    e=int(time.mktime(time.strptime(str(end_dt),"%Y-%m-%d"))*1000)
+    out=[]
+    while s<e:
+        r=requests.get(url,params={"symbol":symbol,"interval":"1h","startTime":s,"endTime":e,"limit":1000})
+        data=r.json()
+        if not isinstance(data,list) or not data: break
+        out+=data; s=data[-1][0]+1
+        time.sleep(0.05)
+    df=pd.DataFrame(out,columns=["ts","o","h","l","c","v","ct","q","n","tb","tq","ig"])
+    df["ts"]=pd.to_datetime(df["ts"],unit="ms")
+    df["c"]=df["c"].astype(float)
+    return df[["ts","c"]]
 
-# ============== ⬇️ 回测函数 =================
+# ---------- Backtest ----------
+def backtest(df):
+    cash, pos, side = init_bal, 0.0, 0     # side 1 long, -1 short
+    entry_val, stake = 0, 0
+    trades, equity = [], []
+    peak, mdd, explode = init_bal, 0, 0
+    for i in range(1,len(df)):
+        price_raw=df["c"].iloc[i]
+        price=price_raw*(1+slip_pct*(1 if side==1 else -1))
+        prev=df["c"].iloc[i-1]; change=(price_raw-prev)/prev
+        # 开仓
+        if change<=-long_th and side==0:
+            stake=cash*pos_pct; qty=stake*lev/price
+            pos, entry_val, side, cash = qty, price, 1, cash-stake
+            trades.append(("buy",price,qty,df["ts"].iloc[i]))
+        elif change>=short_th and side==0:
+            stake=cash*pos_pct; qty=stake*lev/price
+            pos, entry_val, side, cash = qty, price, -1, cash-stake
+            trades.append(("short",price,qty,df["ts"].iloc[i]))
+        # 持仓 PnL
+        if side!=0:
+            pnl=(price-entry_val)*pos*side
+            value= cash + stake + pnl
+            # 止盈/止损
+            if pnl/stake>=tp_pct or pnl/stake<=-sl_pct:
+                cash+=stake+pnl; pos, side=0,0
+                trades.append(("close",price,qty,df["ts"].iloc[i]))
+            # 爆仓（保证金不足）
+            elif abs(pnl)>=stake*(1-maint_mgn):
+                explode+=1; pos, side=0,0; stake=0; cash=value
+        else:
+            value=cash
+        peak=max(peak,value); mdd=max(mdd,(peak-value)/peak)
+        equity.append((df["ts"].iloc[i],value))
+    final=value; yrs=len(df)/(24*365)
+    cagr=(final/init_bal)**(1/yrs)-1 if yrs>0 else 0
+    tr_df=pd.DataFrame(trades,columns=["类型","价格","数量","时间"])
+    eq_df=pd.DataFrame(equity,columns=["时间","净值"])
+    return final,cagr,mdd,explode,tr_df,eq_df
 
-def backtest(df: pd.DataFrame, leverage: int, pos_size: float, fee: float, init_bal: float, exp_dd: float):
-    bal = init_bal
-    pos = 0.0
-    trades = []
-    equity_curve = []
-    peak = init_bal
-    max_dd = 0
-    explosions = 0
-
-    for i in range(1, len(df)):
-        price = df["close"].iloc[i]
-        prev = df["close"].iloc[i-1]
-        pct = (price - prev) / prev
-
-        # 建仓：下跌 1%以上
-        if pct <= -0.01 and bal >= pos_size:
-            qty = (pos_size * leverage) / price
-            pos += qty
-            bal -= pos_size * (1 + fee)
-            trades.append({"时间": df["timestamp"].iloc[i], "价格": price, "方向": "long", "类型": "buy", "本金": pos_size, "杠杆": leverage, "数量": qty})
-        # 平仓：上涨 1%以上
-        elif pct >= 0.01 and pos > 0:
-            proceeds = pos * price * (1 - fee)
-            bal += proceeds
-            trades.append({"时间": df["timestamp"].iloc[i], "价格": price, "方向": "long", "类型": "sell", "本金": None, "杠杆": leverage, "数量": pos})
-            pos = 0
-
-        total = bal + pos * price
-        equity_curve.append({"时间": df["timestamp"].iloc[i], "净值": total})
-        peak = max(peak, total)
-        dd = (peak - total) / peak
-        max_dd = max(max_dd, dd)
-        # 爆仓判定：如果回撤大于设定阈值
-        if dd >= exp_dd / 100:
-            explosions += 1
-            pos = 0  # 强平
-            bal = total
-            peak = bal  # 重置峰值
-
-    final_val = bal + pos * df["close"].iloc[-1]
-    duration_years = len(df) / (24 * 365)
-    cagr = (final_val / init_bal) ** (1/ duration_years) - 1 if duration_years>0 else 0
-    return final_val, cagr, max_dd, explosions, pd.DataFrame(trades), pd.DataFrame(equity_curve)
-
-# ============== ⬇️ 主逻辑 =================
+# ---------- Run ----------
 if st.button("▶️ 开始回测"):
-    for symbol in symbols:
-        st.subheader(f"🔹 {symbol} 回测结果")
-        df = get_data(symbol, start=start_date, end=end_date)
-        if df.empty:
-            st.error(f"获取 {symbol} 数据失败")
-            continue
-
-        best = None
-        results = []
-        for lv in range(leverage_range[0], leverage_range[1]+1, 5):
-            for ps in range(position_range[0], position_range[1]+1, 50):
-                fin, cagr, mdd, exp, trades_df, equity_df = backtest(df.copy(), lv, ps, fee_rate, initial_balance, explosion_drawdown)
-                results.append([lv, ps, fin, cagr, mdd, exp])
-                if best is None or fin > best["final_val"]:
-                    best = {
-                        "lev": lv, "pos": ps, "final_val": fin,
-                        "cagr": cagr, "mdd": mdd, "exp": exp,
-                        "trades": trades_df, "equity": equity_df
-                    }
-
-        # ---- 指标卡片 ----
-        k1,k2,k3,k4 = st.columns(4)
-        k1.metric("最终净值", f"${best['final_val']:,.2f}")
-        k2.metric("年化收益率", f"{best['cagr']*100:.2f}%")
-        k3.metric("最大回撤", f"{best['mdd']*100:.2f}%")
-        k4.metric("爆仓次数", best['exp'])
-
-        # ---- 交互图表 ----
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=best['equity']['时间'], y=best['equity']['净值'], mode="lines", name="净值"))
-        for _, row in best['trades'].iterrows():
-            marker = dict(color=('green' if row['类型']=='buy' else 'red'), size=8)
-            text = '▲' if row['类型']=='buy' else '▼'
-            fig.add_trace(go.Scatter(x=[row['时间']], y=[row['价格']], mode="markers+text", marker=marker, text=[text], name=row['类型'], textposition="top center"))
-        fig.update_layout(title=f"{symbol} 策略交易图", height=450, xaxis_title="时间", yaxis_title="价格", hovermode="x unified")
-        st.plotly_chart(fig, use_container_width=True)
-
-        # ---- 结果表格 & 导出 ----
-        res_df = pd.DataFrame(results, columns=["杠杆", "建仓金额", "最终净值", "CAGR", "MaxDD", "爆仓次数"])
-        st.dataframe(res_df)
-        st.download_button("📥 下载回测结果 CSV", res_df.to_csv(index=False).encode('utf-8-sig'), file_name=f"{symbol}_results_{timestamp}.csv")
-
-        # 导出交易明细/净值
-        st.download_button("📥 下载交易明细 CSV", best['trades'].to_csv(index=False
+    for sym in symbols:
+        data=fetch(sym,start,end)
+        if data.empty: st.error(f"{sym} 无数据"); continue
+        final,cagr,mdd,explode,trades,equity=backtest(data)
+        c1,c2,c3,c4=st.columns(4)
+        c1.metric("最终净值",f"${final:,.2f}")
+        c2.metric("CAGR",f"{cagr*100:.2f}%")
+        c3.metric("最大回撤",f"{mdd*100:.2f}%")
+        c4.metric("爆仓次数",explode)
+        fig=go.Figure([go.Scatter(x=equity['时间'],y=equity['净值'],mode='lines',name='净值')])
+        st.plotly_chart(fig,use_container_width=True)
+        st.dataframe(trades)
+        st.download_button("💾 交易明细 CSV", trades.to_csv(index=False).encode('utf-8-sig'),
+                           file_name=f"{sym}_trades_{ts_tag}.csv")
+        st.download_button("💾 净值曲线 CSV", equity.to_csv(index=False).encode('utf-8-sig'),
+                           file_name=f"{sym}_equity_{ts_tag}.csv")
