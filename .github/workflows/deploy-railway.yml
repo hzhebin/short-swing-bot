@@ -20,3 +20,4 @@ jobs:
      with:
        railwayToken: ${{ secrets.RAILWAY_API_KEY }}
        environment: production
+ 
