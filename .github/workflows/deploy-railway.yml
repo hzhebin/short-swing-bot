@@ -15,7 +15,8 @@ jobs:
       - name: Deploy to Railway
         uses: railwayapp/railway-action@v1
         with:
+          # 这里的变量名要和你在 GitHub Secrets 里设置的一致
           railwayToken: ${{ secrets.RAILWAY_API_KEY }}
-          # 可选：如果你有多个环境，解开注释并改成你在 Railway 上的环境名
-          # environment: production
-Add Railway deploy workflow
+          # 指定你在 Railway 上环境的名字，比如 production
+          environment: production
+          Fix YAML syntax & specify Railway environment
