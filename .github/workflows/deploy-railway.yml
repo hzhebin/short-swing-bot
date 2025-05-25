@@ -1,0 +1,20 @@
+name: 🚀 Deploy to Railway
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Deploy to Railway
+        uses: railwayapp/railway-action@v1
+        with:
+          railwayToken: ${{ secrets.RAILWAY_API_KEY }}
+          # 可选：如果你有多个环境，解开注释并改成你在 Railway 上的环境名
+          # environment: production
