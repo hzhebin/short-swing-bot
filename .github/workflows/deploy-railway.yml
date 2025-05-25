@@ -18,3 +18,4 @@ jobs:
           railwayToken: ${{ secrets.RAILWAY_API_KEY }}
           # 可选：如果你有多个环境，解开注释并改成你在 Railway 上的环境名
           # environment: production
+Add Railway deploy workflow
