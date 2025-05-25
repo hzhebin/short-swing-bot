@@ -3,20 +3,18 @@ name: 🚀 Deploy to Railway
 on:
   push:
     branches:
-      - main        # 只有 main 分支 push 时才触发
+      - main            # 只有 main 分支 push 时触发
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 拉取仓库代码
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. 调用 Railway 官方 Action
-- name: Deploy to Railway
-  uses: railwayapp/railway-action@v2.0.0   # ← 指定完整 tag
-  with:
-    railwayToken: ${{ secrets.RAILWAY_API_KEY }}
-    environment: production
+      - name: Deploy to Railway
+        uses: railwayapp/railway-action@v2.0.0
+        with:
+          railwayToken: ${{ secrets.RAILWAY_API_KEY }}
+          environment: production
