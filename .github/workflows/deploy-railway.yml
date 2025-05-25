@@ -15,9 +15,8 @@ jobs:
         uses: actions/checkout@v3
 
       # 2. 调用 Railway 官方 Action
-         - name: Deploy to Railway
-     uses: railwayapp/railway-action@v2   # ← 改这里
-     with:
-       railwayToken: ${{ secrets.RAILWAY_API_KEY }}
-       environment: production
- 
+- name: Deploy to Railway
+  uses: railwayapp/railway-action@v2.0.0   # ← 指定完整 tag
+  with:
+    railwayToken: ${{ secrets.RAILWAY_API_KEY }}
+    environment: production
