@@ -10,7 +10,7 @@ from zipfile import ZipFile
 from datetime import datetime
 
 st.set_page_config(page_title="策略回测仪表盘", layout="wide")
-st.title("📈 撸短策略自动化回测系统")
+st.title("Bob的 撸短策略自动化回测系统V1.1")
 
 st.sidebar.header("策略参数设置")
 symbols = st.sidebar.multiselect("交易对（可多选）", ["BTCUSDT", "ETHUSDT", "BNBUSDT"], default=["BTCUSDT"])
