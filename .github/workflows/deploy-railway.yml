@@ -3,20 +3,20 @@ name: 🚀 Deploy to Railway
 on:
   push:
     branches:
-      - main
+      - main        # 只有 main 分支 push 时才触发
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
+      # 1. 拉取仓库代码
       - name: Checkout code
         uses: actions/checkout@v3
 
+      # 2. 调用 Railway 官方 Action
       - name: Deploy to Railway
         uses: railwayapp/railway-action@v1
         with:
-          # 这里的变量名要和你在 GitHub Secrets 里设置的一致
-          railwayToken: ${{ secrets.RAILWAY_API_KEY }}
-          # 指定你在 Railway 上环境的名字，比如 production
-          environment: production
-          Fix YAML syntax & specify Railway environment
+          railwayToken: ${{ secrets.RAILWAY_API_KEY }}   # GitHub Secret
+          environment: production                        # Railway 环境名
