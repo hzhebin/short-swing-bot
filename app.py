@@ -135,11 +135,11 @@ if st.button("▶️ 运行策略", use_container_width=True):
 
         # ==== 数值指标 ====
         st.subheader(f"📊 {sym} 关键指标")
-        c1,c2,c3,c4 = st.columns(4)
-        c1.metric("最终净值",$"{stats['final']:,.2f}")
-        c2.metric("总收益率",f"{stats['ret_pct']*100:.2f}%")
-        c3.metric("爆仓次数", stats["explosions"])
-        c4.metric("最大回撤",f"{(stats['min_equity']/stats['max_equity']-1)*100:.2f}%")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("最终净值",  f"${stats['final']:,.2f}")
+c2.metric("总收益率",  f"{stats['ret_pct']*100:.2f}%")
+c3.metric("爆仓次数",  stats["explosions"])
+c4.metric("最大回撤",  f"{(stats['min_equity']/stats['max_equity']-1)*100:.2f}%")
 
         # ==== 下载按钮 ====
         csv_buf = io.StringIO(); trades.to_csv(csv_buf, index=False)
