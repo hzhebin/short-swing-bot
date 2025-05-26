@@ -29,7 +29,6 @@ def fetch_agg_trades(symbol: str, start_time: int, end_time: int) -> list:
         all_trades.extend(data)
         last_id = data[-1]["a"]
 
-        # 超出时间范围或返回数量不足1000说明抓完了
         if len(data) < 1000 or data[-1]["T"] >= end_time:
             break
 
@@ -59,7 +58,3 @@ def get_aggregated_kline(symbol: str, start_dt: str, end_dt: str, interval_secs:
     end_ts = int(datetime.strptime(end_dt, "%Y-%m-%d %H:%M:%S").timestamp() * 1000)
     all_trades = fetch_agg_trades(symbol, start_ts, end_ts)
     return aggregate_to_kline(all_trades, interval_secs)
-
-# 示例用法：
-# df = get_aggregated_kline("BTCUSDT", "2025-04-01 00:00:00", "2025-04-01 00:30:00")
-# print(df.head())
