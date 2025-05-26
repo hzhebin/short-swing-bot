@@ -1,100 +1,134 @@
-# app.py — Advanced Backtest Dashboard
-import streamlit as st, pandas as pd, requests, time, numpy as np, plotly.graph_objects as go
-from datetime import datetime
+# app.py — Streamlit + Optuna Auto‑Optimization
+"""
+点击“🧠 自动优化”按钮后，系统自动搜索参数组合（Optuna TPE），
+输出最佳策略并展示图表 / CSV；同时保留“▶️ 手动回测”按钮。
+"""
 
-# ---------- UI ----------
-st.set_page_config(page_title="Advanced Backtest", layout="wide")
-st.title("📈 Advanced Quant Backtest System")
+from __future__ import annotations
+import streamlit as st, pandas as pd, numpy as np, requests, time, plotly.graph_objects as go
+from datetime import datetime
+import vectorbt as vbt, optuna
+
+# ─── Sidebar UI ──────────────────────────────────────────────────────────
+st.set_page_config(page_title="Auto‑Opt Backtest", layout="wide")
+st.title("📈 Advanced Quant Backtest w/ Auto‑Opt")
 
 sb = st.sidebar
 sb.header("参数面板")
-symbols   = sb.multiselect("交易对", ["BTCUSDT","ETHUSDT","BNBUSDT"], default=["BTCUSDT"])
-start     = sb.date_input("开始日期", value=pd.to_datetime("2024-04-01"))
-end       = sb.date_input("结束日期", value=pd.to_datetime("2025-04-30"))
-init_bal  = sb.number_input("初始资金 $", 1000, 1_000_000, 10_000, 1000)
-lev       = sb.slider("杠杆",1,50,10)
-long_th   = sb.slider("做多开仓下跌阈值 %",0.5,5.0,1.0,0.1)/100
-short_th  = sb.slider("做空开仓上涨阈值 %",0.5,5.0,1.0,0.1)/100
-tp_pct    = sb.slider("止盈 %",0.5,10.0,2.0,0.1)/100
-sl_pct    = sb.slider("止损 %",0.5,10.0,3.0,0.1)/100
-slip_pct  = sb.slider("滑点 ‰",0.0,5.0,1.0,0.1)/1000
-maint_mgn = sb.slider("维持保证金率 %",1,50,10)/100
-pos_pct   = sb.slider("单次投入资金占比 %",1,100,20)/100
-ts_tag    = datetime.now().strftime("%Y%m%d_%H%M%S")
+symbol   = sb.selectbox("交易对", ["BTCUSDT","ETHUSDT","BNBUSDT"], index=0)
+start_dt = sb.date_input("开始日期", pd.to_datetime("2024-04-01"))
+end_dt   = sb.date_input("结束日期", pd.to_datetime("2025-04-30"))
+init_bal = sb.number_input("初始资金($)", 1000, 1_000_000, 10_000, 1000)
 
-# ---------- Data ----------
+# 搜索空间范围
+lev_min,lev_max = sb.slider("杠杆范围", 1,50,(5,20))
+long_min,long_max = sb.slider("做多阈值%范围",0.5,5.0,(0.5,2.0),0.1)
+short_min,short_max = sb.slider("做空阈值%范围",0.5,5.0,(0.5,2.0),0.1)
+trial_num = sb.slider("优化试验次数",10,200,50,10)
+
+# 固定参数
+tp_pct  = sb.slider("止盈%",0.5,10.0,2.0,0.1)/100
+sl_pct  = sb.slider("止损%",0.5,10.0,3.0,0.1)/100
+slip_pct= sb.slider("滑点‰",0.0,5.0,1.0,0.1)/1000
+
+# ─── 数据获取 ───────────────────────────────────────────────────────────
 @st.cache_data
-def fetch(symbol, start_dt, end_dt):
+def fetch_price(sym:str,start,end):
     url="https://api.binance.com/api/v3/klines"
-    s=int(time.mktime(time.strptime(str(start_dt),"%Y-%m-%d"))*1000)
-    e=int(time.mktime(time.strptime(str(end_dt),"%Y-%m-%d"))*1000)
-    out=[]
+    s=int(time.mktime(time.strptime(str(start),"%Y-%m-%d"))*1000)
+    e=int(time.mktime(time.strptime(str(end),"%Y-%m-%d"))*1000)
+    kl=[]
     while s<e:
-        r=requests.get(url,params={"symbol":symbol,"interval":"1h","startTime":s,"endTime":e,"limit":1000})
-        data=r.json()
-        if not isinstance(data,list) or not data: break
-        out+=data; s=data[-1][0]+1
-        time.sleep(0.05)
-    df=pd.DataFrame(out,columns=["ts","o","h","l","c","v","ct","q","n","tb","tq","ig"])
+        r=requests.get(url,params={"symbol":sym,"interval":"1h","startTime":s,"endTime":e,"limit":1000})
+        d=r.json();
+        if not isinstance(d,list) or not d: break
+        kl+=d; s=d[-1][0]+1; time.sleep(0.04)
+    df=pd.DataFrame(kl,columns=["ts","o","h","l","c","v","ct","q","n","tb","tq","ig"])
     df["ts"]=pd.to_datetime(df["ts"],unit="ms")
-    df["c"]=df["c"].astype(float)
-    return df[["ts","c"]]
+    return df.set_index("ts")["c"].astype(float)
 
-# ---------- Backtest ----------
-def backtest(df):
-    cash, pos, side = init_bal, 0.0, 0     # side 1 long, -1 short
-    entry_val, stake = 0, 0
-    trades, equity = [], []
-    peak, mdd, explode = init_bal, 0, 0
-    for i in range(1,len(df)):
-        price_raw=df["c"].iloc[i]
-        price=price_raw*(1+slip_pct*(1 if side==1 else -1))
-        prev=df["c"].iloc[i-1]; change=(price_raw-prev)/prev
-        # 开仓
-        if change<=-long_th and side==0:
-            stake=cash*pos_pct; qty=stake*lev/price
-            pos, entry_val, side, cash = qty, price, 1, cash-stake
-            trades.append(("buy",price,qty,df["ts"].iloc[i]))
-        elif change>=short_th and side==0:
-            stake=cash*pos_pct; qty=stake*lev/price
-            pos, entry_val, side, cash = qty, price, -1, cash-stake
-            trades.append(("short",price,qty,df["ts"].iloc[i]))
-        # 持仓 PnL
-        if side!=0:
-            pnl=(price-entry_val)*pos*side
-            value= cash + stake + pnl
-            # 止盈/止损
-            if pnl/stake>=tp_pct or pnl/stake<=-sl_pct:
-                cash+=stake+pnl; pos, side=0,0
-                trades.append(("close",price,qty,df["ts"].iloc[i]))
-            # 爆仓（保证金不足）
-            elif abs(pnl)>=stake*(1-maint_mgn):
-                explode+=1; pos, side=0,0; stake=0; cash=value
-        else:
-            value=cash
-        peak=max(peak,value); mdd=max(mdd,(peak-value)/peak)
-        equity.append((df["ts"].iloc[i],value))
-    final=value; yrs=len(df)/(24*365)
-    cagr=(final/init_bal)**(1/yrs)-1 if yrs>0 else 0
-    tr_df=pd.DataFrame(trades,columns=["类型","价格","数量","时间"])
-    eq_df=pd.DataFrame(equity,columns=["时间","净值"])
-    return final,cagr,mdd,explode,tr_df,eq_df
+price_series = fetch_price(symbol,start_dt,end_dt)
+if price_series.empty:
+    st.error("数据下载失败，无法继续。"); st.stop()
 
-# ---------- Run ----------
-if st.button("▶️ 开始回测"):
-    for sym in symbols:
-        data=fetch(sym,start,end)
-        if data.empty: st.error(f"{sym} 无数据"); continue
-        final,cagr,mdd,explode,trades,equity=backtest(data)
-        c1,c2,c3,c4=st.columns(4)
-        c1.metric("最终净值",f"${final:,.2f}")
-        c2.metric("CAGR",f"{cagr*100:.2f}%")
-        c3.metric("最大回撤",f"{mdd*100:.2f}%")
-        c4.metric("爆仓次数",explode)
-        fig=go.Figure([go.Scatter(x=equity['时间'],y=equity['净值'],mode='lines',name='净值')])
-        st.plotly_chart(fig,use_container_width=True)
-        st.dataframe(trades)
-        st.download_button("💾 交易明细 CSV", trades.to_csv(index=False).encode('utf-8-sig'),
-                           file_name=f"{sym}_trades_{ts_tag}.csv")
-        st.download_button("💾 净值曲线 CSV", equity.to_csv(index=False).encode('utf-8-sig'),
-                           file_name=f"{sym}_equity_{ts_tag}.csv")
+# ─── 回测函数（vectorbt） ────────────────────────────────────────────
+
+def run_backtest(price, lev, long_th, short_th):
+    pct = price.pct_change()
+    e_long  = pct<=-long_th
+    x_long  = pct>= long_th
+    e_short = pct>= short_th
+    x_short = pct<=-short_th
+    pf = vbt.Portfolio.from_signals(price,
+        e_long|e_short, x_long|x_short,
+        short_entries=e_short,
+        fees=0.0005, slippage=slip_pct,
+        init_cash=init_bal,
+        size=np.where(e_long|e_short, lev, np.nan)
+    )
+    equity = pf.value
+    final  = equity.iloc[-1]
+    mdd    = pf.max_drawdown
+    years  = len(price)/(24*365)
+    cagr   = (final/init_bal)**(1/years)-1 if years>0 else 0
+    return final,cagr,mdd,pf,trades_df(pf)
+
+def trades_df(pf):
+    rec = pf.trades.records_readable
+    return rec if isinstance(rec,pd.DataFrame) else pd.DataFrame(rec)
+
+# ─── 自动优化 ───────────────────────────────────────────────────────────
+
+def objective(trial):
+    lev  = trial.suggest_int("lev", lev_min, lev_max)
+    l_th = trial.suggest_float("long", long_min/100, long_max/100)
+    s_th = trial.suggest_float("short", short_min/100, short_max/100)
+    final,cagr,mdd,_,_ = run_backtest(price_series, lev, l_th, s_th)
+    score = cagr - mdd   # 单目标：收益-回撤
+    return score
+
+# ─── UI 按钮 ───────────────────────────────────────────────────────────
+colA,colB = st.columns(2)
+if colA.button("🧠 自动优化"):
+    with st.spinner("Optuna 正在搜索最佳参数..."):
+        study = optuna.create_study(direction="maximize")
+        study.optimize(objective, n_trials=trial_num)
+        params = params = study.best_params
+    best_score = study.best_value
+    # 生成策略描述文本
+    strategy_txt = (
+        f"策略说明
+"
+        f"----------------------
+"
+        f"• 杠杆倍数: {params['lev']}x
+"
+        f"• 做多条件: 下跌 {params['long']*100:.2f}% 开多
+"
+        f"• 做空条件: 上涨 {params['short']*100:.2f}% 开空
+"
+        f"• 止盈: {tp_pct*100:.2f}%，止损: {sl_pct*100:.2f}%
+"
+        f"• 滑点假设: {slip_pct*1000:.2f}‰
+"
+        f"评分 (CAGR-MaxDD): {best_score:.4f}
+"
+    )
+    st.code(strategy_txt, language='markdown')
+    # 下载策略 JSON
+    st.download_button(
+        "💾 下载策略 JSON",
+        (json.dumps(params, indent=2)).encode('utf-8'),
+        file_name=f"best_strategy_{symbol}_{ts_tag}.json",
+        mime='application/json'
+    )
+    # 复跑生成图表 & 导出
+    final,cagr,mdd,pf,tr = run_backtest(price_series, params['lev'], params['long'], params['short'])(price_series, lev, long_th, short_th)
+    equity = pf.value
+    st.metric("最终净值",f"${final:,.2f}")
+    st.metric("CAGR",f"{cagr*100:.2f}%")
+    st.metric("最大回撤",f"{mdd*100:.2f}%")
+    fig=go.Figure([go.Scatter(x=equity.index,y=equity.values,mode='lines',name='净值')])
+    st.plotly_chart(fig,use_container_width=True)
+    st.dataframe(tr)
+"
