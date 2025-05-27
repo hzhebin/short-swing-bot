@@ -3,9 +3,14 @@ import numpy as np
 
 class RiskAnalyzer:
     def __init__(self, equity_curve: pd.Series):
-        self.eq = equity_curve
+        self.eq = equity_curve.dropna()
 
     def summary(self):
+        if len(self.eq) < 2:
+            return pd.DataFrame({
+                'Metric': ['Total Return', 'Annual Return', 'Max Drawdown', 'Sharpe', 'Sortino'],
+                'Value': [0]*5
+            }).set_index('Metric')
         returns = self.eq.pct_change().dropna()
         cum_ret = self.eq.iloc[-1] / self.eq.iloc[0] - 1
         annual_ret = (1 + cum_ret) ** (365 / len(returns)) - 1

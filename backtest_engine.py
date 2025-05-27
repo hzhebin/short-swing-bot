@@ -11,12 +11,12 @@ class BacktestEngine:
         self.broker = BrokerSimulator(initial_capital=initial_capital, fee_pct=fee_pct)
 
     def run(self):
-        """Iterate over price dataframe, feed to strategy, execute orders."""
         for ts, row in self.price_df.iterrows():
             price = row['close']
+            # record equity each bar
+            self.broker.mark_to_market(price, ts)
             orders = self.strategy.generate(ts, price)
             for side, qty in orders:
-                self.broker.execute(side, price, qty)
-        trades = self.broker.trades
-        equity = self.broker.equity_curve
-        return trades, equity
+                self.broker.execute(side, price, qty, ts)
+        trades_df = pd.DataFrame(self.broker.trades)
+        return trades_df, self.broker.equity_curve
