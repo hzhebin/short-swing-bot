@@ -1,57 +1,17 @@
 
-# 撸短策略自动化回测系统
+# Quant Backtest Engine
 
-一个基于 Streamlit 构建的量化策略回测系统，支持多币种、多参数组合的策略测试，输出净值、交易明细与回测指标，并可一键导出为 CSV 文件。
+## Features
 
-## ✅ 系统核心功能
+- Streamlit UI for backtest
+- Grid and Breakout strategies
+- Plotly charts
+- Risk metrics calculation
+- Extensible modular structure
 
-- 📊 多参数组合策略回测（杠杆 + 建仓金额）
-- 🪙 多币种支持（BTCUSDT / ETHUSDT / BNBUSDT）
-- 🧠 自动选出最佳策略组合（最终净值最大）
-- 📈 Plotly 绘图，展示交易信号和净值曲线
-- 📄 回测数据导出（CSV 文件）：
-  - 回测参数汇总
-  - 每笔交易明细
-  - 净值时间序列
-
-## 🛠️ 安装部署
+## Run
 
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
-
-或使用 Railway / Render 等平台在线部署。
-
-## 📁 文件结构说明
-
-| 文件 | 说明 |
-|------|------|
-| `app.py` | 主程序 |
-| `requirements.txt` | 所需依赖 |
-| `README.md` | 项目说明文件 |
-| *.csv | 回测结果导出数据（运行后生成） |
-
-## 🧪 使用方法
-
-1. 选择交易对和起止时间；
-2. 设置参数范围（杠杆、建仓金额、初始本金等）；
-3. 点击“开始回测”，系统会自动遍历参数组合；
-4. 查看图表、下载交易记录和净值数据。
-
-## 📦 示例导出内容
-
-- `BTCUSDT_results_20240525_1523.csv`：回测参数组合结果表
-- `BTCUSDT_trades_20240525_1523.csv`：最佳策略交易明细
-- `BTCUSDT_equity_20240525_1523.csv`：账户净值随时间变化
-
----
-
-## 📌 后续开发方向
-
-- OKX 实盘下单 API 接入
-- 策略库扩展（均线突破、情绪指标等）
-- 回测报告自动生成（PDF/HTML）
-- 风险控制模块完善（止损/动态仓位等）
-
-> 本项目为教育与研究用途，策略运行请务必谨慎评估风险。
