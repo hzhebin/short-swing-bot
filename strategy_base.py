@@ -1,4 +1,9 @@
+from abc import ABC, abstractmethod
 
-class StrategyBase:
-    def generate_signals(self, data):
-        raise NotImplementedError("Must implement generate_signals")
+class StrategyBase(ABC):
+    """Abstract strategy interface."""
+
+    @abstractmethod
+    def generate(self, timestamp, price):
+        """Return list of tuples (side, quantity). side in {'buy','sell'}"""
+        pass

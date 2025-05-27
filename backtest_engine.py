@@ -1,29 +1,22 @@
-
 import pandas as pd
 from broker_simulator import BrokerSimulator
-import plotly.graph_objects as go
 
 class BacktestEngine:
-    def __init__(self, data, strategy, initial_capital):
-        self.data = data
+    """Core engine orchestrating strategy signals, broker execution and equity tracking."""
+
+    def __init__(self, price_df: pd.DataFrame, strategy, initial_capital: float = 10000,
+                 fee_pct: float = 0.0004):
+        self.price_df = price_df
         self.strategy = strategy
-        self.initial_capital = initial_capital
-        self.simulator = BrokerSimulator(initial_capital)
+        self.broker = BrokerSimulator(initial_capital=initial_capital, fee_pct=fee_pct)
 
     def run(self):
-        trades = self.strategy.generate_signals(self.data)
-        self.simulator.execute_trades(trades, self.data)
-        return {
-            "trades": pd.DataFrame(self.simulator.trade_log),
-            "plot": self._generate_plot(trades)
-        }
-
-    def _generate_plot(self, trades):
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=self.data.index, y=self.data["close"], name="Price"))
-        for trade in trades:
-            color = "green" if trade["type"] == "buy" else "red"
-            fig.add_trace(go.Scatter(x=[trade["time"]], y=[trade["price"]],
-                                     mode="markers", marker=dict(color=color, size=10),
-                                     name=trade["type"].capitalize()))
-        return fig
+        """Iterate over price dataframe, feed to strategy, execute orders."""
+        for ts, row in self.price_df.iterrows():
+            price = row['close']
+            orders = self.strategy.generate(ts, price)
+            for side, qty in orders:
+                self.broker.execute(side, price, qty)
+        trades = self.broker.trades
+        equity = self.broker.equity_curve
+        return trades, equity
